@@ -1,0 +1,6 @@
+{
+  "name": "AgriSmart AI - Smart Farming Assistant",
+  "description": "An AI-powered platform for plant disease detection, soil moisture prediction, and smart farming recommendations.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}

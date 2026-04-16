@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #2d5a27;
+  --color-primary-light: #e8f5e9;
+  --color-accent: #f2994a;
+  --color-text-main: #2c3e50;
+  --color-text-muted: #7f8c8d;
+  --color-bg: #f4f7f6;
+  --color-border: #e0e0e0;
+  
+  --font-sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-bg text-text-main font-sans;
+  }
+}
+
+.card-shadow {
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
