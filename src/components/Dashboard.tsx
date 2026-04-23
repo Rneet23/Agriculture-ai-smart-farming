@@ -1,52 +1,118 @@
-import React, { useState } from 'react';
-import { 
-  Sprout, 
-  Droplets, 
-  Thermometer, 
-  CloudRain, 
-  TrendingUp, 
-  AlertTriangle, 
-  Camera, 
-  LayoutDashboard,
-  Settings,
-  HelpCircle,
-  Search,
-  Plus,
-  ArrowRight,
-  CheckCircle2,
-  Info
+import React, { useState, useEffect } from 'react';
+import {
+  Sprout, Droplets, Thermometer, CloudRain, TrendingUp,
+  Camera, Settings, HelpCircle, Search, Plus,
+  Activity, Wind, Zap, AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
-import { analyzeCropImage, getFarmingPredictions, type DiseaseAnalysis, type FarmingPredictions } from '../services/gemini';
-import { 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
-  AreaChart,
-  Area
+import {
+  analyzeCropImage, getEnhancedPredictions,
+  type DiseaseAnalysis, type FarmingPredictions, type EnhancedPrediction
+} from '../services/gemini';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 
-const MOCK_HISTORY = [
-  { name: 'Mon', moisture: 45, yield: 2.1 },
-  { name: 'Tue', moisture: 42, yield: 2.3 },
-  { name: 'Wed', moisture: 38, yield: 2.5 },
-  { name: 'Thu', moisture: 55, yield: 2.8 },
-  { name: 'Fri', moisture: 52, yield: 3.0 },
-  { name: 'Sat', moisture: 48, yield: 3.2 },
-  { name: 'Sun', moisture: 44, yield: 3.5 },
+interface MarketPrice {
+  name: string;
+  price: string;
+  changePercent: number;
+  currency?: string;
+}
+
+interface SoilHealth {
+  nitrogen: number;
+  phosphorus: number;
+  potassium: number;
+  pH: string;
+  organicMatter: string;
+  lastTested: string;
+}
+
+interface PestRisk {
+  mites: string;
+  aphids: string;
+  powderyMildew: string;
+  leafBlight: string;
+  overallRisk: string;
+}
+
+interface HistoryPoint {
+  date: string;
+  moisture: number;
+  yield: number;
+  rainfall: number;
+  temperature: number;
+}
+
+interface LiveDataState {
+  currentTemp: number;
+  humidity: number;
+  soilMoisture: number;
+  precipitation: number;
+  windSpeed: number;
+  uvIndex: number;
+  rainfallForecast: number;
+  tempMax: number;
+  tempMin: number;
+  marketPrices: MarketPrice[];
+  soilHealth: SoilHealth;
+  pestRisk: PestRisk;
+  airQuality: number;
+  history: HistoryPoint[];
+  forecastDays: number[];
+  timestamp: string;
+}
+
+const EMPTY_LIVE_DATA: LiveDataState = {
+  currentTemp: 0,
+  humidity: 0,
+  soilMoisture: 0,
+  precipitation: 0,
+  windSpeed: 0,
+  uvIndex: 0,
+  rainfallForecast: 0,
+  tempMax: 0,
+  tempMin: 0,
+  marketPrices: [],
+  soilHealth: {
+    nitrogen: 0,
+    phosphorus: 0,
+    potassium: 0,
+    pH: '--',
+    organicMatter: '--',
+    lastTested: '--',
+  },
+  pestRisk: {
+    mites: '--',
+    aphids: '--',
+    powderyMildew: '--',
+    leafBlight: '--',
+    overallRisk: '--',
+  },
+  airQuality: 0,
+  history: [],
+  forecastDays: [],
+  timestamp: new Date().toISOString(),
+};
+
+const NAV_ITEMS = [
+  { id: 'overview', icon: <Activity size={18} />, label: 'Overview' },
+  { id: 'disease',  icon: <Camera size={18} />,   label: 'Disease Detection' },
+  { id: 'soil',     icon: <Droplets size={18} />, label: 'Soil & Irrigation' },
+  { id: 'yield',    icon: <TrendingUp size={18} />, label: 'Yield Prediction' },
 ];
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<DiseaseAnalysis | null>(null);
-  const [predictions, setPredictions] = useState<FarmingPredictions | null>(null);
+  const [predictions, setPredictions] = useState<FarmingPredictions | EnhancedPrediction | null>(null);
   const [savedCrops, setSavedCrops] = useState<any[]>([]);
+  const [isLiveLoading, setIsLiveLoading] = useState(true);
+  const [liveData, setLiveData] = useState<LiveDataState>(EMPTY_LIVE_DATA);
+
   const [formData, setFormData] = useState({
     cropType: 'Wheat',
     soilType: 'Loamy',
@@ -54,13 +120,38 @@ export default function Dashboard() {
     humidity: 65,
     rainfall: 120,
     farmArea: 5,
-    growthStage: 'Vegetative'
+    growthStage: 'Vegetative',
   });
+
+  useEffect(() => {
+    const fetchLiveData = async () => {
+      try {
+        const res = await fetch('/api/farm-data');
+        if (res.ok) {
+          const data: LiveDataState = await res.json();
+          setLiveData(data);
+          setFormData(prev => ({
+            ...prev,
+            temperature: data.currentTemp || prev.temperature,
+            humidity: data.humidity || prev.humidity,
+            rainfall: data.rainfallForecast || prev.rainfall,
+          }));
+        }
+      } catch (err) {
+        console.error('Failed to fetch live farm data:', err);
+      } finally {
+        setIsLiveLoading(false);
+      }
+    };
+
+    fetchLiveData();
+    const interval = setInterval(fetchLiveData, 1_800_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setIsAnalyzing(true);
     try {
       const reader = new FileReader();
@@ -71,8 +162,8 @@ export default function Dashboard() {
         setIsAnalyzing(false);
       };
       reader.readAsDataURL(file);
-    } catch (error) {
-      console.error('Analysis failed:', error);
+    } catch (err) {
+      console.error('Image analysis failed:', err);
       setIsAnalyzing(false);
     }
   };
@@ -80,601 +171,618 @@ export default function Dashboard() {
   const handlePredict = async () => {
     setIsAnalyzing(true);
     try {
-      const result = await getFarmingPredictions(formData);
+      const result = await getEnhancedPredictions(formData);
       setPredictions(result);
-      
-      // Save the prediction to the history
-      const newRecord = {
+      setSavedCrops(prev => [{
         id: Date.now(),
         date: new Date().toLocaleDateString(),
         ...formData,
-        ...result
-      };
-      setSavedCrops(prev => [newRecord, ...prev]);
-      
-      setIsAnalyzing(false);
-    } catch (error) {
-      console.error('Prediction failed:', error);
+        ...result,
+      }, ...prev]);
+    } catch (err) {
+      console.error('Prediction failed:', err);
+    } finally {
       setIsAnalyzing(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-bg text-text-main font-sans flex">
+    <div className="min-h-screen bg-bg-secondary">
       {/* Sidebar */}
-      <aside className="w-80 bg-white border-r border-border flex flex-col hidden md:flex">
-        <div className="p-6 flex items-center gap-3">
-          <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/20">
-            <Sprout size={24} />
+      <aside className="fixed inset-y-0 left-0 w-64 bg-bg-primary border-r border-border hidden lg:flex flex-col shadow-sm">
+        {/* Logo */}
+        <div className="p-6 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary-light flex items-center justify-center text-white shadow-md">
+              <Sprout size={20} />
+            </div>
+            <div>
+              <h1 className="font-display font-700 text-lg text-text-primary">AgriSmart</h1>
+              <p className="text-xs text-text-muted">Smart Farming</p>
+            </div>
           </div>
-          <h1 className="font-extrabold text-xl tracking-tight text-primary uppercase">AgriSmart AI</h1>
         </div>
 
-        <nav className="flex-1 px-4 py-4 space-y-1">
-          <NavItem 
-            icon={<LayoutDashboard size={20} />} 
-            label="Overview" 
-            active={activeTab === 'overview'} 
-            onClick={() => setActiveTab('overview')} 
-          />
-          <NavItem 
-            icon={<Camera size={20} />} 
-            label="Disease Detection" 
-            active={activeTab === 'disease'} 
-            onClick={() => setActiveTab('disease')} 
-          />
-          <NavItem 
-            icon={<Droplets size={20} />} 
-            label="Soil & Irrigation" 
-            active={activeTab === 'soil'} 
-            onClick={() => setActiveTab('soil')} 
-          />
-          <NavItem 
-            icon={<TrendingUp size={20} />} 
-            label="Yield Prediction" 
-            active={activeTab === 'yield'} 
-            onClick={() => setActiveTab('yield')} 
-          />
+        {/* Navigation */}
+        <nav className="flex-1 px-3 py-6 space-y-1">
+          {NAV_ITEMS.map((item, idx) => (
+            <motion.button
+              key={item.id}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.1 }}
+              onClick={() => setActiveTab(item.id)}
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 font-medium text-sm',
+                activeTab === item.id
+                  ? 'bg-primary/10 text-primary shadow-sm'
+                  : 'text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
+              )}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+              {activeTab === item.id && (
+                <motion.div
+                  layoutId="activeIndicator"
+                  className="ml-auto w-2 h-2 rounded-full bg-primary"
+                />
+              )}
+            </motion.button>
+          ))}
         </nav>
 
+        {/* Live Status */}
         <div className="p-4 border-t border-border">
-          <div className="bg-primary-light rounded-xl p-4">
-            <p className="text-[10px] font-bold text-primary uppercase tracking-wider mb-1">Pro Plan</p>
-            <p className="text-sm text-text-main font-semibold mb-3">Get advanced weather insights</p>
-            <button className="w-full py-2 bg-primary text-white rounded-lg text-sm font-bold hover:opacity-90 transition-opacity">
-              Upgrade Now
-            </button>
+          <div className="bg-gradient-to-br from-primary/5 to-secondary/5 rounded-lg p-4 border border-primary/10">
+            <div className="flex items-center gap-2 mb-2">
+              <div className={cn(
+                'w-2.5 h-2.5 rounded-full animate-pulse-subtle',
+                isLiveLoading ? 'bg-warning' : 'bg-success'
+              )} />
+              <span className="text-xs font-semibold text-text-primary">Live Feed</span>
+            </div>
+            <p className="text-xs text-text-muted">
+              {isLiveLoading ? 'Connecting...' : 'Active'}
+            </p>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto">
-        <header className="h-16 bg-white border-b border-border px-8 flex items-center justify-between sticky top-0 z-10">
-          <div className="flex items-center gap-4 bg-bg px-4 py-2 rounded-lg w-96 border border-border">
-            <Search size={18} className="text-text-muted" />
-            <input 
-              type="text" 
-              placeholder="Search farm data..." 
-              className="bg-transparent border-none outline-none text-sm w-full placeholder:text-text-muted"
-            />
-          </div>
-          <div className="flex items-center gap-4">
-            <button className="p-2 text-text-muted hover:text-primary transition-colors">
-              <HelpCircle size={22} />
-            </button>
-            <button className="p-2 text-text-muted hover:text-primary transition-colors">
-              <Settings size={22} />
-            </button>
-            <div className="h-8 w-8 rounded-full bg-primary border border-border shadow-sm flex items-center justify-center text-white font-bold text-xs">
-              JD
+      <main className="lg:ml-64">
+        {/* Header */}
+        <header className="sticky top-0 z-40 bg-bg-primary/95 backdrop-blur-sm border-b border-border">
+          <div className="h-16 px-6 flex items-center justify-between">
+            <div className="flex items-center gap-3 flex-1 max-w-md">
+              <Search size={18} className="text-text-muted" />
+              <input
+                type="text"
+                placeholder="Search farm data..."
+                className="input bg-bg-secondary border-0 focus:ring-0"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button className="p-2 rounded-lg text-text-muted hover:bg-bg-tertiary transition-colors">
+                <HelpCircle size={20} />
+              </button>
+              <button className="p-2 rounded-lg text-text-muted hover:bg-bg-tertiary transition-colors">
+                <Settings size={20} />
+              </button>
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary-light flex items-center justify-center text-white font-semibold text-xs shadow-md">
+                JD
+              </div>
             </div>
           </div>
         </header>
 
-        <div className="p-8 max-w-7xl mx-auto">
+        {/* Page Content */}
+        <div className="p-6 max-w-7xl">
           <AnimatePresence mode="wait">
+
+            {/* ── OVERVIEW ──────────────────────────────────────────── */}
             {activeTab === 'overview' && (
-              <motion.div 
+              <motion.div
                 key="overview"
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-8"
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-6"
               >
+                {/* Header */}
                 <div className="flex items-end justify-between">
-                  <div>
-                    <h2 className="text-2xl font-bold text-text-main">Farm Overview</h2>
-                    <p className="text-text-muted text-sm mt-1">Welcome back, here's what's happening on your farm today.</p>
-                  </div>
-                  <button 
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                    <h2 className="heading-lg">Farm Overview</h2>
+                    <p className="text-text-muted mt-1">
+                      {isLiveLoading ? 'Fetching live data...' : `Last updated ${new Date(liveData.timestamp).toLocaleTimeString()}`}
+                    </p>
+                  </motion.div>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                     onClick={() => setActiveTab('yield')}
-                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-bold hover:opacity-90 transition-all shadow-sm"
+                    className="btn btn-primary"
                   >
                     <Plus size={18} />
-                    <span className="text-sm">Add New Crop</span>
-                  </button>
+                    <span>New Crop</span>
+                  </motion.button>
                 </div>
 
                 {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  <StatCard 
-                    icon={<Thermometer className="text-accent" />} 
-                    label="Avg Temperature" 
-                    value="28°C" 
-                    trend="+2.1° from yesterday"
-                    color="orange"
-                  />
-                  <StatCard 
-                    icon={<Droplets className="text-blue-500" />} 
-                    label="Soil Moisture" 
-                    value="42%" 
-                    trend="-5% from yesterday"
-                    color="blue"
-                  />
-                  <StatCard 
-                    icon={<CloudRain className="text-indigo-500" />} 
-                    label="Expected Rainfall" 
-                    value="12mm" 
-                    trend="Next 24 hours"
-                    color="indigo"
-                  />
-                  <StatCard 
-                    icon={<TrendingUp className="text-primary" />} 
-                    label="Predicted Yield" 
-                    value="3.8t" 
-                    trend="+0.4t vs last season"
-                    color="emerald"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    { label: 'Temperature', value: isLiveLoading ? '--' : `${liveData.currentTemp}°C`, sub: `${liveData.tempMin}° – ${liveData.tempMax}°`, icon: <Thermometer />, color: 'text-warning' },
+                    { label: 'Soil Moisture', value: isLiveLoading ? '--' : `${liveData.soilMoisture}%`, sub: `Wind ${liveData.windSpeed} m/s`, icon: <Droplets />, color: 'text-info' },
+                    { label: 'Rainfall', value: isLiveLoading ? '--' : `${liveData.rainfallForecast.toFixed(1)} mm`, sub: 'Next 24h', icon: <CloudRain />, color: 'text-secondary' },
+                    { label: 'Air Quality', value: isLiveLoading ? '--' : `${liveData.airQuality}`, sub: liveData.airQuality < 50 ? 'Good' : 'Moderate', icon: <Zap />, color: 'text-success' },
+                  ].map((stat, idx) => (
+                    <motion.div
+                      key={idx}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.1 }}
+                      className="card-interactive p-5"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <span className="label">{stat.label}</span>
+                        <div className={cn('p-2 rounded-lg bg-bg-tertiary', stat.color)}>
+                          {stat.icon}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="stat-value">{stat.value}</p>
+                        <p className="caption">{stat.sub}</p>
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
 
-                {/* Weather & News Section */}
+                {/* Charts & Weather */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <div className="lg:col-span-1 bg-white p-6 rounded-xl border border-border card-shadow">
-                    <h3 className="text-[13px] font-bold text-text-muted uppercase tracking-wider mb-4 flex items-center gap-2">
-                      <CloudRain className="text-blue-500" size={16} />
-                      Local Weather
-                    </h3>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between p-3 bg-bg rounded-lg border border-border">
-                        <div className="flex items-center gap-3">
-                          <Thermometer size={18} className="text-accent" />
-                          <span className="text-xs font-semibold text-text-main">Temperature</span>
-                        </div>
-                        <span className="font-bold text-sm">28°C</span>
-                      </div>
-                      <div className="flex items-center justify-between p-3 bg-bg rounded-lg border border-border">
-                        <div className="flex items-center gap-3">
-                          <Droplets size={18} className="text-blue-500" />
-                          <span className="text-xs font-semibold text-text-main">Humidity</span>
-                        </div>
-                        <span className="font-bold text-sm">65%</span>
-                      </div>
-                      <div className="flex items-center justify-between p-3 bg-bg rounded-lg border border-border">
-                        <div className="flex items-center gap-3">
-                          <CloudRain size={18} className="text-indigo-500" />
-                          <span className="text-xs font-semibold text-text-main">Rain Chance</span>
-                        </div>
-                        <span className="font-bold text-sm">15%</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-border card-shadow">
-                    <h3 className="text-[13px] font-bold text-text-muted uppercase tracking-wider mb-4">Farming Insights</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="p-4 border border-border bg-bg rounded-lg">
-                        <p className="text-[10px] font-bold text-primary uppercase mb-1">Market Price</p>
-                        <p className="font-bold text-text-main">Wheat: $240/ton</p>
-                        <p className="text-[11px] text-primary font-semibold mt-1">↑ 2.4% this week</p>
-                      </div>
-                      <div className="p-4 border border-border bg-bg rounded-lg">
-                        <p className="text-[10px] font-bold text-blue-600 uppercase mb-1">Soil Health</p>
-                        <p className="font-bold text-text-main">Nitrogen: Optimal</p>
-                        <p className="text-[11px] text-blue-600 font-semibold mt-1">Last tested 3 days ago</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  <div className="lg:col-span-2 space-y-8">
-                    <div className="bg-white p-6 rounded-xl border border-border card-shadow">
-                      <div className="flex items-center justify-between mb-8">
-                        <h3 className="text-[13px] font-bold text-text-muted uppercase tracking-wider">Moisture & Yield Trends</h3>
-                        <div className="flex gap-4">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full bg-primary" />
-                            <span className="text-[11px] font-bold text-text-muted uppercase">Yield</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                            <span className="text-[11px] font-bold text-text-muted uppercase">Moisture</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="h-80">
+                  {/* Area Chart */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="lg:col-span-2 card p-6"
+                  >
+                    <h3 className="heading-sm mb-6">Moisture & Yield Trends</h3>
+                    {liveData.history.length > 0 ? (
+                      <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={MOCK_HISTORY}>
+                          <AreaChart data={liveData.history}>
                             <defs>
-                              <linearGradient id="colorMoisture" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.05}/>
-                                <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
+                              <linearGradient id="gMoisture" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#457b9d" stopOpacity={0.2} />
+                                <stop offset="95%" stopColor="#457b9d" stopOpacity={0} />
                               </linearGradient>
-                              <linearGradient id="colorYield" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#2d5a27" stopOpacity={0.05}/>
-                                <stop offset="95%" stopColor="#2d5a27" stopOpacity={0}/>
+                              <linearGradient id="gYield" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#2d6a4f" stopOpacity={0.2} />
+                                <stop offset="95%" stopColor="#2d6a4f" stopOpacity={0} />
                               </linearGradient>
                             </defs>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 11, fill: '#7f8c8d'}} dy={10} />
-                            <YAxis axisLine={false} tickLine={false} tick={{fontSize: 11, fill: '#7f8c8d'}} />
-                            <Tooltip 
-                              contentStyle={{ borderRadius: '8px', border: '1px solid #e0e0e0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }}
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" vertical={false} />
+                            <XAxis dataKey="date" stroke="#adb5bd" style={{ fontSize: '12px' }} />
+                            <YAxis stroke="#adb5bd" style={{ fontSize: '12px' }} />
+                            <Tooltip
+                              contentStyle={{
+                                background: '#ffffff',
+                                border: '1px solid #e9ecef',
+                                borderRadius: '8px',
+                                boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                              }}
                             />
-                            <Area type="monotone" dataKey="moisture" stroke="#3B82F6" fillOpacity={1} fill="url(#colorMoisture)" strokeWidth={2} />
-                            <Area type="monotone" dataKey="yield" stroke="#2d5a27" fillOpacity={1} fill="url(#colorYield)" strokeWidth={2} />
+                            <Area type="monotone" dataKey="moisture" stroke="#457b9d" strokeWidth={2} fill="url(#gMoisture)" />
+                            <Area type="monotone" dataKey="yield" stroke="#2d6a4f" strokeWidth={2} fill="url(#gYield)" />
                           </AreaChart>
                         </ResponsiveContainer>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="empty-state">
+                        <Activity size={32} className="text-text-muted mb-2 opacity-40" />
+                        <p className="text-text-muted text-sm">{isLiveLoading ? 'Loading data...' : 'No data available'}</p>
+                      </div>
+                    )}
+                  </motion.div>
 
-                    {/* Recent Records Table */}
-                    <div className="bg-white rounded-xl border border-border card-shadow overflow-hidden">
-                      <div className="p-6 border-b border-border">
-                        <h3 className="text-[13px] font-bold text-text-muted uppercase tracking-wider">Recent Crop Records</h3>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="bg-bg">
-                              <th className="px-6 py-3 text-[10px] font-bold text-text-muted uppercase tracking-wider">Date</th>
-                              <th className="px-6 py-3 text-[10px] font-bold text-text-muted uppercase tracking-wider">Crop</th>
-                              <th className="px-6 py-3 text-[10px] font-bold text-text-muted uppercase tracking-wider">Moisture</th>
-                              <th className="px-6 py-3 text-[10px] font-bold text-text-muted uppercase tracking-wider">Yield (t)</th>
-                              <th className="px-6 py-3 text-[10px] font-bold text-text-muted uppercase tracking-wider">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-border">
-                            {savedCrops.length > 0 ? (
-                              savedCrops.map((crop) => (
-                                <tr key={crop.id} className="hover:bg-bg/50 transition-colors">
-                                  <td className="px-6 py-4 text-xs font-medium text-text-muted">{crop.date}</td>
-                                  <td className="px-6 py-4 text-xs font-bold text-text-main">{crop.cropType}</td>
-                                  <td className="px-6 py-4 text-xs font-bold text-blue-600">{crop.soilMoisture}%</td>
-                                  <td className="px-6 py-4 text-xs font-bold text-primary">{crop.predictedYield}t</td>
-                                  <td className="px-6 py-4">
-                                    <span className={cn(
-                                      "px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-tighter",
-                                      crop.moistureStatus === "Low" ? "bg-red-100 text-red-600" : 
-                                      crop.moistureStatus === "Moderate" ? "bg-blue-100 text-blue-600" : 
-                                      "bg-emerald-100 text-emerald-600"
-                                    )}>
-                                      {crop.moistureStatus}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))
-                            ) : (
-                              <tr>
-                                <td colSpan={5} className="px-6 py-12 text-center text-text-muted text-xs italic">
-                                  No records found. Add a new crop to see data here.
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
+                  {/* Weather */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                    className="card p-6"
+                  >
+                    <h3 className="heading-sm mb-5">Weather Details</h3>
+                    <div className="space-y-3">
+                      {[
+                        { label: 'Temperature', value: isLiveLoading ? '--' : `${liveData.currentTemp}°C`, icon: <Thermometer size={16} /> },
+                        { label: 'Humidity', value: isLiveLoading ? '--' : `${liveData.humidity}%`, icon: <Droplets size={16} /> },
+                        { label: 'Wind Speed', value: isLiveLoading ? '--' : `${liveData.windSpeed} m/s`, icon: <Wind size={16} /> },
+                        { label: 'UV Index', value: isLiveLoading ? '--' : `${liveData.uvIndex}`, icon: <Zap size={16} /> },
+                      ].map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                          <div className="flex items-center gap-2 text-text-secondary">
+                            {item.icon}
+                            <span className="text-sm">{item.label}</span>
+                          </div>
+                          <span className="font-mono font-semibold text-text-primary">{item.value}</span>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-
-                  <div className="space-y-6">
-                    <div className="bg-white p-6 rounded-xl border border-border card-shadow">
-                      <h3 className="text-[13px] font-bold text-text-muted uppercase tracking-wider mb-4">Quick Actions</h3>
-                      <div className="space-y-3">
-                        <ActionButton 
-                          onClick={() => setActiveTab('disease')}
-                          icon={<Camera className="text-primary" />}
-                          title="Analyze Crop"
-                          desc="Upload photo to detect disease"
-                        />
-                        <ActionButton 
-                          onClick={() => setActiveTab('soil')}
-                          icon={<Droplets className="text-blue-600" />}
-                          title="Check Soil"
-                          desc="Get irrigation advice"
-                        />
-                        <ActionButton 
-                          onClick={() => setActiveTab('yield')}
-                          icon={<TrendingUp className="text-indigo-600" />}
-                          title="Predict Yield"
-                          desc="Estimate harvest output"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="bg-primary text-white p-6 rounded-xl shadow-lg relative overflow-hidden">
-                      <div className="relative z-10">
-                        <h3 className="font-bold text-lg mb-2">Smart Tip</h3>
-                        <p className="text-primary-light text-sm leading-relaxed opacity-90">
-                          Based on current humidity levels, we recommend checking your wheat crop for signs of powdery mildew in the lower leaves.
-                        </p>
-                        <button className="mt-4 text-xs font-bold flex items-center gap-2 hover:gap-3 transition-all uppercase tracking-wider">
-                          Learn More <ArrowRight size={14} />
-                        </button>
-                      </div>
-                      <Sprout size={100} className="absolute -bottom-6 -right-6 text-white/10 rotate-12" />
-                    </div>
-                  </div>
+                  </motion.div>
                 </div>
+
+                {/* Market + Soil + Pest */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Market */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.4 }}
+                    className="card p-6"
+                  >
+                    <h3 className="heading-sm mb-5">Live Market Prices</h3>
+                    <div className="space-y-2 overflow-y-auto max-h-48">
+                      {isLiveLoading ? (
+                        <div className="space-y-2">
+                          {[1,2,3].map(i => <div key={i} className="skeleton h-8" />)}
+                        </div>
+                      ) : liveData.marketPrices.length > 0 ? (
+                        liveData.marketPrices.map((asset, idx) => (
+                          <div key={idx} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                            <span className="text-sm font-medium text-text-primary">{asset.name}</span>
+                            <div className="text-right">
+                              <p className="font-mono font-semibold text-text-primary">${asset.price}</p>
+                              <p className={cn('text-xs font-medium', asset.changePercent >= 0 ? 'text-success' : 'text-danger')}>
+                                {asset.changePercent >= 0 ? '↑' : '↓'} {Math.abs(asset.changePercent).toFixed(2)}%
+                              </p>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-text-muted text-center py-4">No market data</p>
+                      )}
+                    </div>
+                  </motion.div>
+
+                  {/* Soil Health */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.5 }}
+                    className="card p-6"
+                  >
+                    <h3 className="heading-sm mb-5">Soil Health</h3>
+                    <div className="space-y-3">
+                      {[
+                        { label: 'Nitrogen', value: isLiveLoading ? '--' : `${liveData.soilHealth.nitrogen} mg/kg` },
+                        { label: 'Phosphorus', value: isLiveLoading ? '--' : `${liveData.soilHealth.phosphorus} mg/kg` },
+                        { label: 'Potassium', value: isLiveLoading ? '--' : `${liveData.soilHealth.potassium} mg/kg` },
+                        { label: 'pH', value: isLiveLoading ? '--' : liveData.soilHealth.pH },
+                      ].map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between">
+                          <span className="text-sm text-text-secondary">{item.label}</span>
+                          <span className="font-mono font-semibold text-primary">{item.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+
+                  {/* Pest Risk */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.6 }}
+                    className={cn(
+                      'card p-6',
+                      !isLiveLoading && liveData.pestRisk.overallRisk === 'High' && 'border-danger/30 bg-danger/3'
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-5">
+                      <h3 className="heading-sm">Pest Risk</h3>
+                      {!isLiveLoading && liveData.pestRisk.overallRisk !== '--' && (
+                        <span className={cn('badge', getRiskBadge(liveData.pestRisk.overallRisk))}>
+                          {liveData.pestRisk.overallRisk}
+                        </span>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      {[
+                        { label: 'Mites', value: isLiveLoading ? '--' : liveData.pestRisk.mites },
+                        { label: 'Aphids', value: isLiveLoading ? '--' : liveData.pestRisk.aphids },
+                        { label: 'Powdery Mildew', value: isLiveLoading ? '--' : liveData.pestRisk.powderyMildew },
+                      ].map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between">
+                          <span className="text-sm text-text-secondary">{item.label}</span>
+                          <span className={cn('text-xs font-semibold', getRiskColor(item.value))}>
+                            {item.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </div>
+
+                {/* Crop Records */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.7 }}
+                  className="card overflow-hidden"
+                >
+                  <div className="p-6 border-b border-border flex items-center justify-between">
+                    <h3 className="heading-sm">Recent Crop Records</h3>
+                    <span className="badge badge-neutral">{savedCrops.length}</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-bg-tertiary border-b border-border">
+                          {['Date', 'Crop', 'Moisture', 'Yield', 'Status'].map(h => (
+                            <th key={h} className="px-6 py-3 text-left label">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {savedCrops.length > 0 ? (
+                          savedCrops.slice(0, 5).map(crop => (
+                            <tr key={crop.id} className="border-b border-border hover:bg-bg-tertiary transition-colors">
+                              <td className="px-6 py-4 text-text-secondary">{crop.date}</td>
+                              <td className="px-6 py-4 font-medium text-text-primary">{crop.cropType}</td>
+                              <td className="px-6 py-4 font-mono text-info">{crop.soilMoisture}%</td>
+                              <td className="px-6 py-4 font-mono text-primary">{crop.predictedYield}t</td>
+                              <td className="px-6 py-4">
+                                <span className={cn('badge', getRiskBadge(crop.moistureStatus))}>
+                                  {crop.moistureStatus}
+                                </span>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-8 text-center text-text-muted">
+                              No records yet
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </motion.div>
               </motion.div>
             )}
 
+            {/* ── DISEASE DETECTION ─────────────────────────────────── */}
             {activeTab === 'disease' && (
-              <motion.div 
+              <motion.div
                 key="disease"
-                initial={{ opacity: 0, x: 10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -10 }}
-                className="space-y-8"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-6"
               >
                 <div>
-                  <h2 className="text-2xl font-bold text-text-main">Plant Diagnostic</h2>
-                  <p className="text-text-muted text-sm mt-1">Upload a clear photo of the affected leaf or plant part.</p>
+                  <h2 className="heading-lg">Plant Diagnostic</h2>
+                  <p className="text-text-muted mt-1">Upload a photo of your crop for AI disease detection</p>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <div className="bg-bg p-8 rounded-xl border-2 border-dashed border-border flex flex-col items-center justify-center min-h-[400px] relative group hover:border-primary transition-colors cursor-pointer">
-                    <input 
-                      type="file" 
-                      accept="image/*" 
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Upload Zone */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="card border-2 border-dashed border-primary/30 p-8 flex flex-col items-center justify-center min-h-96 hover:border-primary/60 hover:bg-primary/2 transition-all cursor-pointer group relative"
+                  >
+                    <input
+                      type="file"
+                      accept="image/*"
                       onChange={handleImageUpload}
                       className="absolute inset-0 opacity-0 cursor-pointer z-20"
                     />
-                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-primary mb-4 border border-border shadow-sm group-hover:scale-105 transition-transform">
+                    <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-4 group-hover:scale-110 transition-transform">
                       <Camera size={32} />
                     </div>
-                    <p className="text-base font-bold text-text-main">Click or drag photo here</p>
-                    <p className="text-text-muted text-xs mt-1">Supports JPG, PNG up to 10MB</p>
-                    
+                    <p className="heading-sm text-center mb-2">Drop image here or click</p>
+                    <p className="text-text-muted text-sm">JPG, PNG — up to 10MB</p>
+
                     {isAnalyzing && (
-                      <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-30 flex flex-col items-center justify-center rounded-xl">
-                        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
-                        <p className="font-bold text-primary text-sm">AI is analyzing your crop...</p>
+                      <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center rounded-lg z-30">
+                        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-3" />
+                        <p className="text-sm font-medium text-primary">Analyzing...</p>
                       </div>
                     )}
-                  </div>
+                  </motion.div>
 
-                  <div className="space-y-6">
-                    {analysisResult ? (
-                      <div className="bg-white p-6 rounded-xl border border-border card-shadow space-y-6">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-xl font-bold text-text-main">{analysisResult.disease}</h3>
-                          <div className={cn(
-                            "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                            analysisResult.disease === "Healthy" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
-                          )}>
-                            {Math.round(analysisResult.confidence * 100)}% Confidence
-                          </div>
-                        </div>
-                        
-                        <p className="text-sm text-text-muted leading-relaxed">{analysisResult.description}</p>
-
-                        <div className="grid grid-cols-1 gap-1 pt-2">
-                          <DataRow label="Pesticide" value={analysisResult.pesticide} />
-                          <DataRow label="Insecticide" value={analysisResult.insecticide} />
-                          <DataRow label="Fertilizer" value={analysisResult.fertilizer} />
-                        </div>
-
-                        <div className="pt-6 border-t border-border">
-                          <h4 className="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
-                            <CheckCircle2 size={14} className="text-primary" />
-                            Treatment Plan
-                          </h4>
-                          <p className="text-xs text-text-main whitespace-pre-line leading-relaxed bg-bg p-4 rounded-lg border border-border">
-                            {analysisResult.treatment}
-                          </p>
+                  {/* Results */}
+                  {analysisResult ? (
+                    <motion.div
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="card p-6 space-y-5"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="heading-md">{analysisResult.disease}</h3>
+                        <span className={cn('badge', analysisResult.disease === 'Healthy' ? 'badge-success' : 'badge-danger')}>
+                          {Math.round(analysisResult.confidence * 100)}%
+                        </span>
+                      </div>
+                      <p className="text-text-secondary">{analysisResult.description}</p>
+                      <div className="border-t border-border pt-4 space-y-3">
+                        <div>
+                          <p className="label mb-1">Recommendations</p>
+                          <p className="text-sm text-text-secondary whitespace-pre-line">{analysisResult.treatment}</p>
                         </div>
                       </div>
-                    ) : (
-                      <div className="bg-white p-8 rounded-xl border border-border card-shadow flex flex-col items-center justify-center text-center h-full min-h-[400px]">
-                        <div className="w-12 h-12 bg-bg rounded-full flex items-center justify-center text-text-muted mb-4 border border-border">
-                          <LayoutDashboard size={24} />
-                        </div>
-                        <p className="font-bold text-text-muted text-sm uppercase tracking-wider">Analysis results will appear here</p>
-                      </div>
-                    )}
-                  </div>
+                    </motion.div>
+                  ) : (
+                    <div className="empty-state card bg-bg-tertiary">
+                      <AlertCircle size={32} className="text-text-muted mb-3 opacity-40" />
+                      <p className="text-text-muted">Results will appear here</p>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
 
+            {/* ── PREDICTIONS ──────────────────────────────────────── */}
             {(activeTab === 'soil' || activeTab === 'yield') && (
-              <motion.div 
+              <motion.div
                 key="prediction"
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-8"
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-6"
               >
                 <div>
-                  <h2 className="text-2xl font-bold text-text-main">
-                    {activeTab === 'soil' ? 'Soil & Irrigation' : 'Yield Prediction'}
-                  </h2>
-                  <p className="text-text-muted text-sm mt-1">Enter your farm data to get AI-powered insights.</p>
+                  <h2 className="heading-lg">{activeTab === 'soil' ? 'Soil & Irrigation' : 'Yield Prediction'}</h2>
+                  <p className="text-text-muted mt-1">Enter farm data for AI-powered predictions</p>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  <div className="bg-white p-6 rounded-xl border border-border card-shadow space-y-6">
-                    <h3 className="text-[13px] font-bold text-text-muted uppercase tracking-wider mb-4">Farm Data</h3>
-                    <div className="space-y-4">
-                      <InputGroup label="Crop Type" value={formData.cropType} onChange={(v) => setFormData({...formData, cropType: v})} />
-                      <InputGroup label="Soil Type" value={formData.soilType} onChange={(v) => setFormData({...formData, soilType: v})} />
-                      <div className="grid grid-cols-2 gap-4">
-                        <InputGroup label="Temp (°C)" type="number" value={formData.temperature} onChange={(v) => setFormData({...formData, temperature: Number(v)})} />
-                        <InputGroup label="Humidity (%)" type="number" value={formData.humidity} onChange={(v) => setFormData({...formData, humidity: Number(v)})} />
-                      </div>
-                      <InputGroup label="Rainfall (mm)" type="number" value={formData.rainfall} onChange={(v) => setFormData({...formData, rainfall: Number(v)})} />
-                      <InputGroup label="Farm Area (ha)" type="number" value={formData.farmArea} onChange={(v) => setFormData({...formData, farmArea: Number(v)})} />
-                      <InputGroup label="Growth Stage" value={formData.growthStage} onChange={(v) => setFormData({...formData, growthStage: v})} />
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Form */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="card p-6 space-y-4"
+                  >
+                    <h3 className="heading-sm">Farm Parameters</h3>
+                    <FormField label="Crop Type" value={formData.cropType} onChange={v => setFormData({ ...formData, cropType: v })} />
+                    <FormField label="Soil Type" value={formData.soilType} onChange={v => setFormData({ ...formData, soilType: v })} />
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField label="Temp °C" type="number" value={formData.temperature} onChange={v => setFormData({ ...formData, temperature: Number(v) })} />
+                      <FormField label="Humidity %" type="number" value={formData.humidity} onChange={v => setFormData({ ...formData, humidity: Number(v) })} />
                     </div>
-                    <button 
+                    <FormField label="Rainfall mm" type="number" value={formData.rainfall} onChange={v => setFormData({ ...formData, rainfall: Number(v) })} />
+                    <FormField label="Area (ha)" type="number" value={formData.farmArea} onChange={v => setFormData({ ...formData, farmArea: Number(v) })} />
+                    <FormField label="Growth Stage" value={formData.growthStage} onChange={v => setFormData({ ...formData, growthStage: v })} />
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
                       onClick={handlePredict}
                       disabled={isAnalyzing}
-                      className="w-full py-3 bg-primary text-white rounded-lg font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2 disabled:opacity-50 text-sm"
+                      className="btn btn-primary w-full mt-6"
                     >
-                      {isAnalyzing ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <TrendingUp size={18} />}
+                      {isAnalyzing ? (
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <TrendingUp size={18} />
+                      )}
                       Calculate Predictions
-                    </button>
-                  </div>
+                    </motion.button>
+                  </motion.div>
 
-                  <div className="lg:col-span-2 space-y-6">
+                  {/* Results */}
+                  <div className="lg:col-span-2 space-y-4">
                     {predictions ? (
-                      <div className="grid grid-cols-1 gap-6">
+                      <>
                         {activeTab === 'soil' && (
-                          <div className="bg-white p-6 rounded-xl border border-border card-shadow space-y-6">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2 text-blue-600">
-                                <Droplets size={20} />
-                                <h3 className="text-[13px] font-bold uppercase tracking-wider">Soil & Irrigation</h3>
-                              </div>
-                              <div className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-bold uppercase">
-                                {predictions.moistureStatus}
-                              </div>
+                          <motion.div
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className="card p-6"
+                          >
+                            <div className="flex items-center justify-between mb-4">
+                              <h3 className="heading-sm flex items-center gap-2">
+                                <Droplets size={20} className="text-info" />
+                                Soil & Irrigation
+                              </h3>
+                              <span className="badge badge-info">{predictions.moistureStatus}</span>
                             </div>
-                            <div className="flex items-baseline gap-1">
-                              <span className="text-[32px] font-light text-text-main">{predictions.soilMoisture}%</span>
-                              <span className="text-xs font-bold text-text-muted uppercase">Moisture</span>
+                            <p className="text-4xl font-display font-700 text-primary mb-1">
+                              {predictions.soilMoisture}<span className="text-lg text-text-muted">%</span>
+                            </p>
+                            <p className="text-text-muted text-sm mb-4">Soil moisture estimate</p>
+                            <div className="bg-bg-tertiary rounded-lg p-4 border border-border">
+                              <p className="label mb-2">Recommendation</p>
+                              <p className="text-sm text-text-secondary">{predictions.irrigationAdvice}</p>
                             </div>
-                            <div className="p-4 bg-bg rounded-lg border border-border">
-                              <p className="text-[10px] font-bold text-primary uppercase mb-1">Recommendation</p>
-                              <p className="text-xs text-text-main leading-relaxed font-semibold">{predictions.irrigationAdvice}</p>
-                            </div>
-                          </div>
+                          </motion.div>
                         )}
 
                         {activeTab === 'yield' && (
-                          <div className="bg-white p-6 rounded-xl border border-border card-shadow space-y-6">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2 text-primary">
-                                <TrendingUp size={20} />
-                                <h3 className="text-[13px] font-bold uppercase tracking-wider">Yield & Harvest</h3>
-                              </div>
-                              <div className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-bold uppercase">
-                                On Track
-                              </div>
+                          <motion.div
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className="card p-6"
+                          >
+                            <div className="flex items-center justify-between mb-4">
+                              <h3 className="heading-sm flex items-center gap-2">
+                                <TrendingUp size={20} className="text-primary" />
+                                Yield Forecast
+                              </h3>
+                              <span className="badge badge-success">On Track</span>
                             </div>
-                            <div className="flex items-baseline gap-1">
-                              <span className="text-[32px] font-light text-text-main">{predictions.predictedYield}t</span>
-                              <span className="text-xs font-bold text-text-muted uppercase">Per Hectare</span>
+                            <p className="text-4xl font-display font-700 text-primary mb-1">
+                              {predictions.predictedYield}<span className="text-lg text-text-muted"> t/ha</span>
+                            </p>
+                            <p className="text-text-muted text-sm mb-4">Expected yield per hectare</p>
+                            <div className="bg-bg-tertiary rounded-lg p-4 border border-border">
+                              <p className="label mb-2">Harvest Timeline</p>
+                              <p className="text-sm text-text-secondary">{predictions.harvestTime}</p>
                             </div>
-                            <div className="p-4 bg-bg rounded-lg border border-border">
-                              <p className="text-[10px] font-bold text-primary uppercase mb-1">Estimated Harvest</p>
-                              <p className="text-xs text-text-main leading-relaxed font-semibold">{predictions.harvestTime}</p>
-                            </div>
-                          </div>
+                          </motion.div>
                         )}
 
-                        <div className="bg-primary text-white p-6 rounded-xl shadow-lg">
-                          <div className="flex items-center gap-3 mb-4">
-                            <Sprout size={20} className="text-primary-light" />
-                            <h3 className="text-[13px] font-bold uppercase tracking-wider">Fertilizer Recommendation</h3>
-                          </div>
-                          <p className="text-sm text-primary-light leading-relaxed font-medium">
-                            {predictions.fertilizerAdvice}
+                        <motion.div
+                          initial={{ opacity: 0, x: 20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.1 }}
+                          className="card p-6 bg-gradient-to-br from-primary/5 to-secondary/5 border border-primary/20"
+                        >
+                          <p className="label mb-3 flex items-center gap-2">
+                            <Sprout size={14} /> Fertilizer Recommendation
                           </p>
-                        </div>
-                      </div>
+                          <p className="text-sm text-text-secondary">{predictions.fertilizerAdvice}</p>
+                        </motion.div>
+                      </>
                     ) : (
-                      <div className="bg-white p-8 rounded-xl border border-border card-shadow flex flex-col items-center justify-center text-center h-full min-h-[400px]">
-                        <div className="w-12 h-12 bg-bg rounded-full flex items-center justify-center text-text-muted mb-4 border border-border">
-                          <TrendingUp size={24} />
-                        </div>
-                        <p className="font-bold text-text-muted text-sm uppercase tracking-wider">Enter data and click calculate to see results</p>
+                      <div className="empty-state card bg-bg-tertiary">
+                        <TrendingUp size={32} className="text-text-muted mb-3 opacity-40" />
+                        <p className="text-text-muted">Enter data and calculate to see predictions</p>
                       </div>
                     )}
                   </div>
                 </div>
               </motion.div>
             )}
+
           </AnimatePresence>
         </div>
       </main>
     </div>
-
   );
 }
 
-function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
-  return (
-    <button 
-      onClick={onClick}
-      className={cn(
-        "w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all uppercase tracking-wider",
-        active 
-          ? "bg-primary-light text-primary border-b-2 border-primary" 
-          : "text-text-muted hover:bg-bg hover:text-text-main"
-      )}
-    >
-      {icon}
-      <span className="text-[12px]">{label}</span>
-    </button>
-  );
-}
+// ── Helper Components ──────────────────────────────────────────────────────
 
-function StatCard({ icon, label, value, trend, color }: { icon: React.ReactNode, label: string, value: string, trend: string, color: string }) {
-  return (
-    <div className="bg-white p-6 rounded-xl border border-border card-shadow hover:shadow-md transition-shadow flex flex-col">
-      <div className="flex justify-between items-start mb-4">
-        <p className="text-[11px] font-bold text-text-muted uppercase tracking-wider">{label}</p>
-        <div className="w-8 h-8 rounded-lg bg-bg flex items-center justify-center">
-          {icon}
-        </div>
-      </div>
-      <h4 className="text-[32px] font-light text-text-main leading-none">{value}</h4>
-      <div className="mt-auto pt-4 border-t border-border">
-        <p className="text-[11px] font-bold text-primary uppercase tracking-wide">{trend}</p>
-      </div>
-    </div>
-  );
-}
-
-function ActionButton({ icon, title, desc, onClick }: { icon: React.ReactNode, title: string, desc: string, onClick: () => void }) {
-  return (
-    <button 
-      onClick={onClick}
-      className="w-full flex items-center gap-4 p-4 rounded-xl border border-border hover:border-primary hover:bg-bg transition-all text-left group"
-    >
-      <div className="w-10 h-10 rounded-lg bg-bg flex items-center justify-center group-hover:bg-white transition-colors border border-border">
-        {icon}
-      </div>
-      <div>
-        <p className="text-sm font-bold text-text-main">{title}</p>
-        <p className="text-[11px] text-text-muted font-medium">{desc}</p>
-      </div>
-      <ArrowRight size={16} className="ml-auto text-text-muted group-hover:text-primary group-hover:translate-x-1 transition-all" />
-    </button>
-  );
-}
-
-function DataRow({ label, value }: { label: string, value: string }) {
-  return (
-    <div className="flex justify-between py-2 border-b border-border last:border-0">
-      <span className="text-xs font-medium text-text-muted uppercase tracking-wider">{label}</span>
-      <span className="text-xs font-bold text-text-main">{value}</span>
-    </div>
-  );
-}
-
-function InputGroup({ label, value, onChange, type = "text" }: { label: string, value: any, onChange: (v: any) => void, type?: string }) {
+function FormField({
+  label, value, onChange, type = 'text',
+}: {
+  label: string; value: any; onChange: (v: any) => void; type?: string;
+}) {
   return (
     <div className="space-y-1.5">
-      <label className="text-[10px] font-bold text-text-muted uppercase tracking-wider ml-1">{label}</label>
-      <input 
+      <label className="block text-xs font-semibold text-text-tertiary uppercase tracking-wider">{label}</label>
+      <input
         type={type}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full px-4 py-2 bg-bg border border-border rounded-lg text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all placeholder:text-text-muted/50"
+        onChange={e => onChange(e.target.value)}
+        className="w-full px-4 py-2.5 rounded-lg border border-border bg-white text-text-primary placeholder-text-muted text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all"
       />
     </div>
   );
+}
+
+function getRiskBadge(risk: string): string {
+  if (risk === 'High') return 'badge-danger';
+  if (risk === 'Moderate') return 'badge-warning';
+  if (risk === 'Low') return 'badge-success';
+  return 'badge-neutral';
+}
+
+function getRiskColor(risk: string): string {
+  if (risk === 'High') return 'text-danger font-semibold';
+  if (risk === 'Moderate') return 'text-warning font-semibold';
+  if (risk === 'Low') return 'text-success font-semibold';
+  return 'text-text-muted';
 }
