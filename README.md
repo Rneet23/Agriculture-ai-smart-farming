@@ -1,20 +1,73 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Agriculture AI - Smart Farming Platform
 
-# Run and deploy your AI Studio app
+An intelligent agricultural management system powered by AI and real-time live data feeds. Get actionable insights for crop health, disease detection, yield prediction, and market analysis.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/33939ba8-ac42-4d0a-ad29-c06032ff95e0
+### 🌱 Live Data Integration
+- **Real-Time Weather Data** - Open-Meteo API provides current temperature, humidity, rainfall, soil moisture, wind speed, and UV index
+- **Live Commodity Prices** - Yahoo Finance integration for wheat, corn, soybeans, cotton, coffee, sugar and other agricultural commodities
+- **Soil Health Monitoring** - Real-time NPK levels, pH, and organic matter analysis
+- **Pest Risk Assessment** - AI-driven pest and disease risk prediction based on environmental conditions
+- **Historical Trend Analysis** - 7-day moisture and yield history with forecasts
 
-## Run Locally
+### 🤖 AI-Powered Features
+- **Crop Disease Detection** - Upload crop images for instant disease identification using Gemini AI
+- **Yield Prediction** - Get predictive yield estimates based on live environmental data
+- **Smart Recommendations** - Personalized fertilizer, irrigation, and pest management advice
+- **Environmental Analysis** - Real-time environmental factor assessment and recommendations
 
-**Prerequisites:**  Node.js
+### 📊 Dashboard Analytics
+- Live weather monitoring with historical trends
+- Commodity market price tracking
+- Soil health indicators
+- Pest risk warnings
+- Crop growth stage monitoring
+- Irrigation and fertilizer recommendations
+  
+## Setup & Configuration
 
+### Prerequisites
+- Node.js 18+
+- Gemini API Key (from [ai.google.dev](https://ai.google.dev/))
+
+### Installation
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+   ```bash
+   npm install
+   ```
+
+2. Set up environment variables:
+   ```bash
+   cp .env.example .env.local
+   ```
+
+3. Add your Gemini API Key to `.env.local`:
+   ```env
+   GEMINI_API_KEY=your_gemini_api_key_here
+   ```
+
+### Running the Application
+
+**Development mode:**
+```bash
+npm run dev
+```
+
+The app will start at `http://localhost:3000` with live data feeds automatically enabled.
+
+**Build for production:**
+```bash
+npm run build
+```
+
+**Preview production build:**
+```bash
+npm run preview
+```
+
+## API Endpoints
+
+### GET /api/farm-data
+Returns all real-time environmental and market data.
